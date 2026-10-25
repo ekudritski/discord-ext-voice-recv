@@ -6,6 +6,8 @@ import time
 import logging
 import threading
 
+from collections import deque
+
 from operator import itemgetter
 from typing import TYPE_CHECKING
 
@@ -76,6 +78,8 @@ class AudioReader:
         self.event_router: SinkEventRouter = SinkEventRouter(sink, self)
         self.decryptor: PacketDecryptor = PacketDecryptor(voice_client.mode, bytes(voice_client.secret_key))
         self._crypto_errors: int = 0
+        # packets of an SSRC not yet mapped to a user, see _waits_for_user()
+        self._unknown_ssrc_packets: Dict[int, deque] = {}
         self.speaking_timer: SpeakingTimer = SpeakingTimer(self)
         self.speaking_timer.speaking_timeout_delay = speaking_timeout
         self.keepalive: UDPKeepAlive = UDPKeepAlive(voice_client)
@@ -200,6 +204,13 @@ class AudioReader:
                 if packet.padding:
                     # Discord's SFU pads packets it forwards in bursts; left in, DAVE finds no trailer and drops them
                     packet.decrypted_data = rtp.strip_padding(packet.decrypted_data)
+                if self._waits_for_user(packet):
+                    # the 50 is upstream's own guess (1 s of audio); older packets are dropped
+                    self._unknown_ssrc_packets.setdefault(packet.ssrc, deque(maxlen=50)).append(packet)
+                    return
+                for held in self._unknown_ssrc_packets.pop(packet.ssrc, ()):
+                    if self._dave_decrypt(held):
+                        self._feed_rtp(held)
                 if not self._dave_decrypt(packet):
                     return
             else:
@@ -240,24 +251,34 @@ class AudioReader:
         if rtcp_packet:
             self.packet_router.feed_rtcp(rtcp_packet)
         elif rtp_packet:
-            ssrc = rtp_packet.ssrc
+            self._feed_rtp(rtp_packet)
 
-            if ssrc not in self.voice_client._ssrc_to_id:
-                if rtp_packet.is_silence():
-                    # TODO: buffer packets from unknown ssrcs, 50 max?
-                    # also remove this log later its pointless
-                    log.debug("Skipping silence packet for unknown ssrc %s", ssrc)
-                    return
-                else:
-                    log.info("Received packet for unknown ssrc %s:\n%s", ssrc, rtp_packet)
+    def _waits_for_user(self, packet: rtp.RTPPacket) -> bool:
+        # DAVE decryption needs the sender's user id. A new speaker's first packets can arrive just before
+        # the SPEAKING message that maps their SSRC, so they are held until the mapping is there.
+        state = self.voice_client._connection
+        if davey is None or state.dave_session is None or state.dave_protocol_version == 0 or packet.is_silence():
+            return False
+        return self.voice_client._get_id_from_ssrc(packet.ssrc) is None
 
-            self.speaking_timer.notify(ssrc)
-            try:
-                self.packet_router.feed_rtp(rtp_packet)
-            except Exception as e:
-                log.exception('Error processing rtp packet')
-                self.error = e
-                self.stop()
+    def _feed_rtp(self, rtp_packet: rtp.RTPPacket) -> None:
+        ssrc = rtp_packet.ssrc
+
+        if ssrc not in self.voice_client._ssrc_to_id:
+            if rtp_packet.is_silence():
+                # also remove this log later its pointless
+                log.debug("Skipping silence packet for unknown ssrc %s", ssrc)
+                return
+            else:
+                log.info("Received packet for unknown ssrc %s:\n%s", ssrc, rtp_packet)
+
+        self.speaking_timer.notify(ssrc)
+        try:
+            self.packet_router.feed_rtp(rtp_packet)
+        except Exception as e:
+            log.exception('Error processing rtp packet')
+            self.error = e
+            self.stop()
 
 
 class PacketDecryptor:

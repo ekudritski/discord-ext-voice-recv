@@ -49,6 +49,7 @@ def reader_with(reader_key, client_key):
     reader.voice_client = StubVoiceClient(client_key)
     reader.decryptor = PacketDecryptor(MODE, reader_key)
     reader._crypto_errors = 0
+    reader._unknown_ssrc_packets = {}
     reader.error = None
     reader.packet_router = StubRouter()
     reader.speaking_timer = StubTimer()
@@ -126,3 +127,28 @@ def test_strip_padding_edge_cases():
     assert strip_padding(b"\x04\x04\x04\x04") == b""
     assert strip_padding(b"ab\x09") == b"ab\x09"  # count larger than the payload: leave it
     assert strip_padding(b"") == b""
+
+
+class EchoSession:
+    def decrypt(self, user_id, media_type, data):
+        return data + b"!"
+
+
+def test_packets_before_ssrc_mapping_are_held_for_dave():
+    # a new speaker's first packet can arrive before SPEAKING maps the SSRC to a user
+    key = os.urandom(32)
+    reader = reader_with(key, key)
+    vc = reader.voice_client
+    vc._connection.dave_session = EchoSession()
+    vc._connection.dave_protocol_version = 1
+    vc._ssrc_to_id = {}
+    vc._get_id_from_ssrc = lambda ssrc: vc._ssrc_to_id.get(ssrc)
+
+    reader.callback(encrypt(key, 1))
+    reader.callback(encrypt(key, 2))
+    assert reader.packet_router.fed == []
+
+    vc._ssrc_to_id[SSRC] = 42
+    reader.callback(encrypt(key, 3))
+    assert reader.packet_router.fed == [1, 2, 3]
+    assert all(p.decrypted_data.endswith(b"!") for p in reader.packet_router.packets)
