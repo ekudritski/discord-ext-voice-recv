@@ -147,6 +147,16 @@ class VoiceRecvClient(discord.VoiceClient):
         if self.is_listening():
             raise discord.ClientException('Already receiving audio.')
 
+        if not sink.wants_opus():
+            # otherwise the first packet fails inside the reader thread and listening stops silently
+            try:
+                discord.opus.Decoder.get_opus_version()
+            except discord.opus.OpusNotLoaded:
+                raise discord.opus.OpusNotLoaded(
+                    'libopus is needed to decode audio for a sink whose wants_opus() is False. '
+                    'Install libopus (or call discord.opus.load_opus()), or use a sink that wants opus.'
+                ) from None
+
         self._reader = AudioReader(sink, self, after=after)
         self._reader.start()
 

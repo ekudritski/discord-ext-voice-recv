@@ -20,7 +20,17 @@ To install directly from github:
 python -m pip install git+https://github.com/imayhaveborkedit/discord-ext-voice-recv
 ```
 
-Naturally, this extension depends on `discord.py` being installed with voice support (`pynacl`).
+Naturally, this extension depends on `discord.py` being installed with voice support, version 2.7 or newer
+(`discord.py[voice]`: `PyNaCl` for transport decryption, `davey` for DAVE end-to-end encryption, which Discord requires).
+
+What else is needed depends on the data a sink asks for:
+
+| sink | gets | needs |
+|---|---|---|
+| `wants_opus()` returns `True` | Opus packets as Discord sent them | nothing more |
+| `wants_opus()` returns `False` | decoded 48 kHz stereo PCM | `libopus` (bundled with discord.py on Windows, a system package elsewhere, e.g. `libopus0` / `opus`) |
+
+`listen()` raises `discord.opus.OpusNotLoaded` right away when a PCM sink is used and `libopus` can't be loaded.
 
 ## Example
 See the [example script](examples/recv.py).

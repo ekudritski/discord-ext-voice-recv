@@ -22,7 +22,7 @@ if version.endswith(('a', 'b', 'rc')):
         pass
 
 # local version label of the Pesa fork, see PEP 440
-version += '+pesa5'
+version += '+pesa6'
 
 with open('README.md') as f:
     readme = f.read()
@@ -52,7 +52,8 @@ setup(
     long_description_content_type='text/markdown',
     include_package_data=True,
     python_requires='>=3.8',
-    install_requires=['discord.py[voice]>=2.5'],
+    # DAVE (end-to-end encryption, required by Discord) is supported since discord.py 2.7.0
+    install_requires=['discord.py[voice]>=2.7'],
     extras_require=extras_require,
     zip_safe=False,
     classifiers=[
@@ -65,6 +66,7 @@ setup(
         'Programming Language :: Python :: 3.10',
         'Programming Language :: Python :: 3.11',
         'Programming Language :: Python :: 3.12',
+        'Programming Language :: Python :: 3.13',
         'Operating System :: POSIX',
         'Operating System :: Microsoft :: Windows',
         'Operating System :: MacOS',
