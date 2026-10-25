@@ -5,6 +5,8 @@ from __future__ import annotations
 import time
 import asyncio
 import logging
+import functools
+import threading
 
 import discord
 from discord.voice_state import VoiceConnectionState
@@ -98,11 +100,25 @@ class VoiceRecvClient(discord.VoiceClient):
     def dispatch(self, event: str, /, *args: Any, **kwargs: Any) -> None:
         log.debug("Dispatching voice_client event %s", event)
 
+        self.dispatch_sink(event, *args, **kwargs)
+        self._dispatch_listeners(event, *args, **kwargs)
+
+    def dispatch_threadsafe(self, event: str, /, *args: Any, **kwargs: Any) -> None:
+        """:meth:`dispatch` for threads other than the event loop's: listeners are scheduled through the loop."""
+        log.debug("Dispatching voice_client event %s from %s", event, threading.current_thread().name)
+
+        self.dispatch_sink(event, *args, **kwargs)
+        try:
+            self.client.loop.call_soon_threadsafe(functools.partial(self._dispatch_listeners, event, *args, **kwargs))
+        except RuntimeError:
+            # the loop is closed, the client is shutting down
+            log.debug("Event loop closed, not dispatching %s", event)
+
+    def _dispatch_listeners(self, event: str, /, *args: Any, **kwargs: Any) -> None:
         event_name = f"on_{event}"
         for coro in self._event_listeners.get(event_name, []):
             self._schedule_event(coro, event_name, *args, **kwargs)
 
-        self.dispatch_sink(event, *args, **kwargs)
         self.client.dispatch(event, *args, **kwargs)
 
     def dispatch_sink(self, event: str, /, *args: Any, **kwargs: Any) -> None:

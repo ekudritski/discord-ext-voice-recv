@@ -381,7 +381,8 @@ class SpeakingTimer(threading.Thread):
         who = self._lookup_member(ssrc)
         if not who:
             return
-        self.voice_client.dispatch_sink(event, who)
+        # runs on the UDP reader and timer threads, listeners and client events need the event loop (#63)
+        self.voice_client.dispatch_threadsafe(event, who)
 
     def notify(self, ssrc: Optional[int] = None) -> None:
         if ssrc is not None:
