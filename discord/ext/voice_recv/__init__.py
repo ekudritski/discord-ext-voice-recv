@@ -8,6 +8,7 @@ from .opus import *
 from .rtp import *
 from .enums import *
 from .ogg import *
+from .utterance import *
 
 from . import (
     rtp as rtp,

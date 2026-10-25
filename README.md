@@ -143,6 +143,24 @@ This extension comes with several useful built in sinks, as well as a few [extra
     - `TimedFilter` - A conditional filter with a timer for how long it should operate.
   - `SilenceGeneratorSink` - Generates silence to fill in audio transmission downtime for a continuous data stream.  **Note: This sink is pretty broken and buggy right now and slated for rewrite.  Usage is not advised.**
 
+### Utterances
+`UtteranceSink` collects each user's speech and hands it over as one `Utterance` as soon as the user has been
+quiet for `silence` seconds (default 2), without waiting for them to speak again. Pauses shorter than that stay
+inside the utterance and are filled with silence, so the audio keeps real time.
+
+```py
+def on_utterance(u: voice_recv.Utterance):
+    print(u.user, f"{u.duration:.1f} s")
+    u.write_wav(f"{u.user.id}_{u.started:.0f}.wav")   # or u.to_wav(), u.pcm(); write_ogg()/opus() for Opus
+
+vc.listen(voice_recv.UtteranceSink(on_utterance, silence=2.0, decode=True))
+```
+
+`decode=True` gives PCM (needs libopus), `decode=False` keeps the Opus packets. The callback runs on the sink's own
+thread, so slow work there (speech to text, uploads) does not hold up receiving audio. Each utterance is also
+dispatched as the event `on_voice_member_utterance(member, utterance)`. When listening stops, utterances in progress
+are handed over as well.
+
 ### Ogg Opus files
 `OggOpusWriter` writes Opus packets into an Ogg Opus file as they are, without re-encoding and without libogg (pure Python). Use it from a sink with `wants_opus()` returning `True`:
 
