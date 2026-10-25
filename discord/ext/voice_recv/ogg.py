@@ -8,6 +8,8 @@ import struct
 
 from typing import TYPE_CHECKING
 
+from .rtp import OPUS_SILENCE
+
 if TYPE_CHECKING:
     from typing import BinaryIO, Final, List, Optional, Union
 
@@ -68,8 +70,9 @@ class OggOpusWriter:
     """Writes Opus packets into an Ogg Opus file (RFC 7845) as they are, without re-encoding.
 
     Pure Python, no libogg. Page layout follows libogg, so the output matches a libogg based writer.
-    The granule position advances by each packet's own duration; gaps (lost packets, pauses)
-    are the caller's business, e.g. writing ``rtp.OPUS_SILENCE`` packets in their place.
+    The granule position advances by each packet's own duration. An empty packet (a lost one,
+    :class:`FakePacket`) is written as 20 ms of silence. Pauses, where Discord sends nothing, are the
+    caller's business, e.g. writing ``rtp.OPUS_SILENCE`` packets in their place.
 
     Parameters
     ----------
@@ -123,7 +126,8 @@ class OggOpusWriter:
     def write(self, packet: Union[bytes, bytearray, memoryview]) -> None:
         if self._closed:
             raise ValueError('write to a closed OggOpusWriter')
-        packet = bytes(packet)
+        # a lost packet comes as FakePacket with empty data; an empty Ogg packet makes ffmpeg stop reading the file
+        packet = bytes(packet) or OPUS_SILENCE
         self._granule += opus_packet_samples(packet)
         self._packet_in(packet, self._granule)
         while self._page_out(self._first_page):

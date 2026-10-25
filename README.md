@@ -152,7 +152,7 @@ writer.write(data.opus)  # in AudioSink.write()
 writer.close()
 ```
 
-The granule position advances by each packet's duration. Gaps (lost packets, pauses) are not filled in, write `voice_recv.rtp.OPUS_SILENCE` packets in their place if the file should keep real time.
+The granule position advances by each packet's duration. A lost packet (empty `data.opus`) is written as 20 ms of silence. Pauses, where Discord sends nothing, are not filled in: write `voice_recv.rtp.OPUS_SILENCE` packets in their place if the file should keep real time.
 
 ### Sink event listeners
 With AudioSinks being potentially more complex and stateful than AudioSources and the addition of new events, it is sometimes necessary to handle events in the context of a sink.  It would be rather awkward to have to register a sink function with `commands.Bot.add_listener()` while dealing with thread safety, and even more so using `discord.Client`.  To remedy this, listeners can be defined within sinks, similarly to how they work in Cogs.

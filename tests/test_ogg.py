@@ -127,3 +127,13 @@ def test_opus_packet_samples(packet, samples):
 def test_opus_packet_samples_empty():
     with pytest.raises(ValueError):
         opus_packet_samples(b"")
+
+
+def test_lost_packet_becomes_silence():
+    out = io.BytesIO()
+    with OggOpusWriter(out) as w:
+        w.write(bytes([0xFC, 1]))
+        w.write(b"")
+        w.write(bytes([0xFC, 2]))
+    assert read_packets(read_pages(out.getvalue()))[2:] == [bytes([0xFC, 1]), OPUS_SILENCE, bytes([0xFC, 2])]
+    assert w.granule == 3 * 960
