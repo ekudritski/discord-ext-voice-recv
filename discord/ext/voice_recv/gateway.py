@@ -60,7 +60,7 @@ async def hook(self: DiscordVoiceWebSocket, msg: Dict[str, Any]):
             m = msg.copy()
             m.pop('op')
             m.pop('d')
-            log.info("WS payload has extra keys: %s", m)
+            log.debug("WS payload has extra keys: %s", m)
 
     if op == self.READY:
         vc._add_ssrc(vc.guild.me.id, data['ssrc'])

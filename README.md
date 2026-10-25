@@ -284,6 +284,9 @@ A helper sink for using `SpeechRecognition` to perform speech-to-text conversion
 
 Helper sinks for playing audio through an audio output device the local system.  Defaults to the system default device, but other output devices can also be specified.
 
+## discord.py internals
+This extension uses some non-public parts of discord.py, listed in [DISCORD_INTERNALS.md](DISCORD_INTERNALS.md).
+
 ## Currently missing or WIP features
 - Silence generation (WIP, pending rewrite)
 

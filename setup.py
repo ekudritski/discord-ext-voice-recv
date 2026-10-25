@@ -22,7 +22,7 @@ if version.endswith(('a', 'b', 'rc')):
         pass
 
 # local version label of the Pesa fork, see PEP 440
-version += '+pesa11'
+version += '+pesa12'
 
 with open('README.md') as f:
     readme = f.read()
