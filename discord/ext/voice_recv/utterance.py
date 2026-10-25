@@ -14,6 +14,7 @@ from typing import TYPE_CHECKING
 
 from discord.opus import Decoder
 
+from .aio import AsyncBridge
 from .ogg import OggOpusWriter
 from .rtp import OPUS_SILENCE
 from .sinks import AudioSink
@@ -117,9 +118,10 @@ class UtteranceSink(AudioSink):
 
     Every utterance goes to ``on_utterance(utterance)`` (if given) and is dispatched as the event
     ``voice_member_utterance(member, utterance)`` to sink listeners, ``VoiceRecvClient.add_listener()``
-    and client events. Both run on the sink's own thread, not the one receiving packets, so slow work
-    there (speech to text, network) does not hold up the audio. When listening stops, the utterances
-    in progress are handed over too.
+    and client events, and is yielded by ``async for utterance in sink`` (from the moment iteration
+    starts; it ends when listening stops). The callback runs on the sink's own thread, not the one
+    receiving packets, so slow work there (speech to text, network) does not hold up the audio.
+    When listening stops, the utterances in progress are handed over too.
 
     Parameters
     ----------
@@ -144,6 +146,7 @@ class UtteranceSink(AudioSink):
         self._lock = threading.Lock()
         self._closed = False
         self._voice_client = None
+        self._bridge = AsyncBridge()
         self._done: queue.SimpleQueue[Optional[Utterance]] = queue.SimpleQueue()
         self._thread = threading.Thread(target=self._run, daemon=True, name=f'utterance-sink-{id(self):x}')
         self._thread.start()
@@ -182,6 +185,10 @@ class UtteranceSink(AudioSink):
         self._done.put(None)
         if threading.current_thread() is not self._thread:
             self._thread.join()
+        self._bridge.close(self.client.loop if self.client else None)
+
+    def __aiter__(self) -> AsyncBridge:
+        return self._bridge.__aiter__()
 
     def _finish(self, ssrc: int) -> None:
         utterance = self._current.pop(ssrc, None)
@@ -227,3 +234,4 @@ class UtteranceSink(AudioSink):
                 log.exception('Error in on_utterance callback for %s', utterance)
         if self.voice_client is not None:
             self.voice_client.dispatch_threadsafe('voice_member_utterance', utterance.user, utterance)
+            self._bridge.put(self.client.loop if self.client else None, utterance)

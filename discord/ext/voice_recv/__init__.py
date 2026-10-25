@@ -9,6 +9,7 @@ from .rtp import *
 from .enums import *
 from .ogg import *
 from .utterance import *
+from .aio import *
 
 from . import (
     rtp as rtp,

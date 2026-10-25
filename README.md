@@ -161,6 +161,23 @@ thread, so slow work there (speech to text, uploads) does not hold up receiving 
 dispatched as the event `on_voice_member_utterance(member, utterance)`. When listening stops, utterances in progress
 are handed over as well.
 
+### asyncio
+Sinks are written to from a receiving thread. To work with audio in coroutines instead:
+
+```py
+sink = voice_recv.AsyncPacketSink(decode=False)
+vc.listen(sink)
+async for user, data in sink:       # ends when listening stops
+    ...
+
+sink = voice_recv.UtteranceSink(decode=True)
+vc.listen(sink)
+async for utterance in sink:
+    text = await speech_to_text(utterance.to_wav())
+```
+
+Items are queued from the moment iteration starts, so start iterating right after `listen()`.
+
 ### Ogg Opus files
 `OggOpusWriter` writes Opus packets into an Ogg Opus file as they are, without re-encoding and without libogg (pure Python). Use it from a sink with `wants_opus()` returning `True`:
 

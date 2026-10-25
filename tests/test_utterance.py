@@ -15,9 +15,14 @@ class Packet:
         self.ssrc, self.sequence, self.timestamp, self.decrypted_data = ssrc, seq, ts, data
 
 
+class StubClient:
+    loop = None
+
+
 class StubVoiceClient:
     def __init__(self):
         self.events = []
+        self.client = StubClient()
 
     def dispatch_threadsafe(self, event, *args):
         self.events.append((event, args))
