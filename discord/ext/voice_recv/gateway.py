@@ -68,7 +68,7 @@ async def hook(self: DiscordVoiceWebSocket, msg: Dict[str, Any]):
     elif op == self.SESSION_DESCRIPTION:
         if vc._reader:
             # TODO: remove bytes cast once type is fixed in dpy
-            vc._reader.update_secret_key(bytes(self.secret_key))  # type: ignore
+            vc._reader.update_secret_key(bytes(self.secret_key), vc.mode)  # type: ignore
 
     elif op == self.SPEAKING:
         # this event refers to the speaking MODE, e.g. priority speaker
