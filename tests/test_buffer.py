@@ -197,3 +197,32 @@ def test_waiter_does_not_accumulate_duplicates():
     h.drain()
     h.push(range(200, 400))
     assert len(h.router.waiter._items) <= 1
+
+
+def test_duplicate_in_buffer_written_once():
+    h = Harness()
+    h.push([*range(10), 11, 11, 10, *range(12, 20)])
+    assert h.everything() == list(range(20))
+
+
+def late_lines(caplog):
+    return [r.args for r in caplog.records if r.getMessage().startswith("Late packet")]
+
+
+def test_late_packets_are_measured(caplog):
+    caplog.set_level("INFO", logger="discord.ext.voice_recv.buffer")
+    h = Harness()
+    h.push([*range(10), 11, 12, 13, 10, *range(14, 30)])
+    h.push([20])
+    h.push([*range(30, 50)])
+    (ssrc, seq, depth, ms, outcome), (_, old_seq, old_depth, _, old_outcome) = late_lines(caplog)
+    assert (seq, depth, outcome) == (10, 3, "saved")
+    assert 0 <= ms < 1000
+    assert (old_seq, old_depth, old_outcome) == (20, 9, "dropped")
+
+
+def test_in_order_stream_logs_nothing(caplog):
+    caplog.set_level("INFO", logger="discord.ext.voice_recv.buffer")
+    h = Harness()
+    h.push([n for n in range(65500, 65600) if n % 7])
+    assert not late_lines(caplog)

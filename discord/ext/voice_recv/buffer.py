@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 import heapq
+from collections import deque
 import logging
 import threading
 import time
@@ -19,7 +20,7 @@ from typing import (
 from .rtp import _PacketCmpMixin
 
 if TYPE_CHECKING:
-    from typing import Optional, List
+    from typing import Optional, List, Tuple
     from .rtp import AudioPacket
 
 __all__ = [
@@ -110,6 +111,9 @@ class HeapJitterBuffer(BaseBuffer[PacketT]):
         self._last_tx_seq: int = -1
         self._gap_since: Optional[float] = None
         self._stray: List[AudioPacket] = []
+        # newest sequence received and recent arrival times, only to measure how late reordered packets are
+        self._max_seq: int = -1
+        self._arrivals: deque = deque(maxlen=100)
 
         self._has_item: threading.Event = threading.Event()
         # I sure hope I dont need to add a lock to this
@@ -179,6 +183,24 @@ class HeapJitterBuffer(BaseBuffer[PacketT]):
             packet = heapq.heappop(self._buffer)
             # log.debug("Dropped extra packet %s", packet)
 
+    def _lateness(self, seq: int) -> Optional[Tuple[int, float]]:
+        """
+        Returns (packets behind the newest, ms since the first newer packet arrived)
+        for a packet arriving out of order, None for one in order.
+        """
+
+        now = time.monotonic()
+        if self._max_seq < 0 or gap_wrapped(self._max_seq, seq) < 32768:
+            self._max_seq = seq
+            self._arrivals.append((seq, now))
+            return None
+
+        depth = gap_wrapped(seq, self._max_seq) + 1
+        for newer_seq, arrived in self._arrivals:
+            if gap_wrapped(seq, newer_seq) < 32768:
+                return depth, (now - arrived) * 1000
+        return depth, -1.0
+
     def push(self, packet: AudioPacket) -> bool:
         """
         Push a packet into the buffer.  If the packet would make the buffer
@@ -188,11 +210,18 @@ class HeapJitterBuffer(BaseBuffer[PacketT]):
         """
 
         seq = packet.sequence
+        late = self._lateness(seq)
+
+        if late is not None and any(p.sequence == seq for p in self._buffer):
+            log.info("Late packet ssrc=%s seq=%s depth=%s late_ms=%.0f %s", packet.ssrc, seq, *late, "duplicate")
+            return False
 
         # for the gap between _last_tx_seq and the current one, a large gap is old, a small gap is new
         # the gap for old packets will generally be very large since they wrap all the way around
         if gap_wrapped(self._last_tx_seq, seq) > self._threshold and self._last_tx_seq != -1:
             self._stray.append(packet)
+            if late is not None:
+                log.info("Late packet ssrc=%s seq=%s depth=%s late_ms=%.0f %s", packet.ssrc, seq, *late, "dropped")
             if len(self._stray) < self._resync_after:
                 log.debug("Dropping old packet %s", packet)
                 return False
@@ -203,6 +232,8 @@ class HeapJitterBuffer(BaseBuffer[PacketT]):
             for old in stray:
                 self._push(old)
         else:
+            if late is not None:
+                log.info("Late packet ssrc=%s seq=%s depth=%s late_ms=%.0f %s", packet.ssrc, seq, *late, "saved")
             self._stray.clear()
             self._push(packet)
 
@@ -304,3 +335,5 @@ class HeapJitterBuffer(BaseBuffer[PacketT]):
         self._last_tx_seq = -1
         self._gap_since = None
         self._stray = []
+        self._max_seq = -1
+        self._arrivals.clear()
