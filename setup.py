@@ -21,6 +21,9 @@ if version.endswith(('a', 'b', 'rc')):
     except Exception:
         pass
 
+# local version label of the Pesa fork, see PEP 440
+version += '+pesa1'
+
 with open('README.md') as f:
     readme = f.read()
 
