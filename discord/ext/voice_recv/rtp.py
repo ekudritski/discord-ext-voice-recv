@@ -38,6 +38,14 @@ __all__ = [
 OPUS_SILENCE: Final = b'\xf8\xff\xfe'
 
 
+def strip_padding(data: bytes) -> bytes:
+    """Removes RTP padding (RFC 3550 5.1): the last octet counts the padding octets, itself included."""
+    count = data[-1] if data else 0
+    if 0 < count <= len(data):
+        return data[:-count]
+    return data
+
+
 class ExtensionID:
     audio_power: Final = 1
     speaking_state: Final = 9
@@ -201,7 +209,7 @@ class RTPPacket(_PacketCmpMixin):
             self.csrcs = struct.unpack(fmt, data[12:offset])
             self.data = data[offset:]
 
-        # TODO?: impl padding calculations (though discord doesn't seem to use that bit)
+        # padding is inside the encrypted payload, see strip_padding()
 
     def adjust_rtpsize(self):
         """Adjusts the packet header and data based on the rtpsize format."""

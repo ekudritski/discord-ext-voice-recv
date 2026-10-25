@@ -32,9 +32,11 @@ class StubVoiceClient:
 class StubRouter:
     def __init__(self):
         self.fed = []
+        self.packets = []
 
     def feed_rtp(self, packet):
         self.fed.append(packet.sequence)
+        self.packets.append(packet)
 
 
 class StubTimer:
@@ -100,3 +102,27 @@ def test_update_secret_key_takes_new_mode():
     reader.update_secret_key(os.urandom(32), "xsalsa20_poly1305_lite")
     assert reader.decryptor.mode == "xsalsa20_poly1305_lite"
     assert isinstance(reader.decryptor.box, nacl.secret.SecretBox)
+
+
+def test_rtp_padding_is_stripped():
+    # the SFU sets the padding bit and pads inside the encrypted payload
+    key = os.urandom(32)
+    payload = b"\x78\x00\x01" + b"\xfa\xfa"
+    header = struct.pack(">BBHII", 0xA0, 0x78, 5, 5 * 960, SSRC)
+    nonce = bytearray(24)
+    nonce[:4] = struct.pack(">I", 5)
+    padded = payload + b"\x03\x03\x03"
+    data = header + nacl.secret.Aead(key).encrypt(padded, header, bytes(nonce)).ciphertext + nonce[:4]
+
+    reader = reader_with(key, key)
+    reader.callback(data)
+    assert reader.packet_router.packets[-1].decrypted_data == payload
+
+
+def test_strip_padding_edge_cases():
+    from discord.ext.voice_recv.rtp import strip_padding
+
+    assert strip_padding(b"abc\x01") == b"abc"
+    assert strip_padding(b"\x04\x04\x04\x04") == b""
+    assert strip_padding(b"ab\x09") == b"ab\x09"  # count larger than the payload: leave it
+    assert strip_padding(b"") == b""

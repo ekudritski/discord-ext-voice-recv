@@ -197,6 +197,9 @@ class AudioReader:
             if not rtp.is_rtcp(packet_data):
                 packet = rtp_packet = rtp.decode_rtp(packet_data)
                 packet.decrypted_data = self.decryptor.decrypt_rtp(packet)
+                if packet.padding:
+                    # Discord's SFU pads packets it forwards in bursts; left in, DAVE finds no trailer and drops them
+                    packet.decrypted_data = rtp.strip_padding(packet.decrypted_data)
                 if not self._dave_decrypt(packet):
                     return
             else:
