@@ -89,12 +89,13 @@ class _PacketCmpMixin:
     def __lt__(self, other: _PacketCmpMixin) -> bool:
         if self.ssrc != other.ssrc:
             raise TypeError("packet ssrc mismatch (%s, %s)" % (self.ssrc, other.ssrc))
-        return self.sequence < other.sequence and self.timestamp < other.timestamp
+        # wrap-aware: sequence is a 16 bit counter that rolls over every ~22 min of speech
+        return self.sequence != other.sequence and (other.sequence - self.sequence) % 65536 < 32768
 
     def __gt__(self, other: _PacketCmpMixin) -> bool:
         if self.ssrc != other.ssrc:
             raise TypeError("packet ssrc mismatch (%s, %s)" % (self.ssrc, other.ssrc))
-        return self.sequence > other.sequence or self.timestamp > other.timestamp
+        return other.__lt__(self)
 
     def __eq__(self, other: _PacketCmpMixin) -> bool:
         if self.ssrc != other.ssrc:

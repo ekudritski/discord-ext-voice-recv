@@ -105,20 +105,9 @@ class PacketDecoder:
         packet = self._buffer.pop(timeout=timeout)
 
         if packet is None:
-            # Gets the last (buffered) packet out (i think)
-            # TODO: revist this, might be an issue
-            if self._buffer:
-                packets = self._buffer.flush()
-                if any(packets[1:]):
-                    log.warning(
-                        "%s packets were lost being flushed in decoder-%s\n --> (last=%s) %s",
-                        len(packets) - 1,
-                        self.ssrc,
-                        self._last_seq,
-                        [p.sequence for p in packets],
-                    )
-                return packets[0]
-            return
+            # Next packet is missing: skip the gap with the oldest buffered packet.
+            # Flushing here used to drop everything behind it on a single lost packet.
+            return self._buffer.pop_oldest()
         elif not packet:
             packet = self._make_fakepacket()
 

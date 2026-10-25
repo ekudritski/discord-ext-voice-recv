@@ -19,6 +19,11 @@ try:
 except ImportError as e:
     raise RuntimeError("pynacl is required") from e
 
+try:
+    import davey
+except ImportError:
+    davey = None
+
 if TYPE_CHECKING:
     from typing import Optional, Callable, Any, Dict, Literal, Union
 
@@ -133,16 +138,40 @@ class AudioReader:
     def _is_ip_discovery_packet(self, data: bytes) -> bool:
         return len(data) == 74 and data[1] == 0x02
 
+    def _dave_decrypt(self, packet: rtp.RTPPacket) -> bool:
+        # Since 2026-03 Discord voice is end-to-end encrypted (DAVE): after the transport layer the
+        # opus payload is still encrypted. discord.py keeps the MLS session, we only decrypt with it.
+        state = self.voice_client._connection
+        session = state.dave_session
+        if davey is None or session is None or state.dave_protocol_version == 0:
+            return True
+        if packet.is_silence():
+            return True
+
+        user_id = self.voice_client._get_id_from_ssrc(packet.ssrc)
+        if user_id is None:
+            return False
+
+        try:
+            packet.decrypted_data = session.decrypt(user_id, davey.MediaType.audio, packet.decrypted_data)
+        except Exception as e:
+            # normal around MLS epoch transitions, the packet is lost
+            log.debug("DAVE decrypt failed for ssrc=%s user=%s: %s", packet.ssrc, user_id, e)
+            return False
+        return packet.decrypted_data is not None
+
     def callback(self, packet_data: bytes) -> None:
         packet = rtp_packet = rtcp_packet = None
         try:
             if not rtp.is_rtcp(packet_data):
                 packet = rtp_packet = rtp.decode_rtp(packet_data)
                 packet.decrypted_data = self.decryptor.decrypt_rtp(packet)
+                if not self._dave_decrypt(packet):
+                    return
             else:
                 packet = rtcp_packet = rtp.decode_rtcp(self.decryptor.decrypt_rtcp(packet_data))
 
-                if not isinstance(packet, rtp.ReceiverReportPacket):
+                if not isinstance(packet, (rtp.ReceiverReportPacket, rtp.SenderReportPacket)):
                     log.info("Received unexpected rtcp packet: type=%s, %s", packet.type, type(packet))
                     log.debug("Packet info:\n  packet=%s\n  data=%s", packet, packet_data)
         except CryptoError as e:

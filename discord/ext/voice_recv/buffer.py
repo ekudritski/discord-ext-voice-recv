@@ -184,6 +184,20 @@ class HeapJitterBuffer(BaseBuffer[PacketT]):
         self._update_has_item()
         return packet
 
+    def pop_oldest(self) -> Optional[AudioPacket]:
+        """
+        Pop the oldest packet even if it is not sequential, skipping the gap.
+        The rest of the buffer is kept.
+        """
+
+        if not self._buffer:
+            return None
+
+        packet = self._pop()
+        self._last_tx_seq = packet.sequence
+        self._update_has_item()
+        return packet
+
     def peek(self, *, all: bool = False) -> Optional[AudioPacket]:
         """
         Returns the next packet in the buffer only if it is ready, meaning it can
