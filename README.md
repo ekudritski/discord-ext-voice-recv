@@ -68,11 +68,18 @@ voice_client = await voice_channel.connect(cls=voice_recv.VoiceRecvClient)
 
 ### New voice client functions
 ```python
-def listen(sink: voice_recv.AudioSink, *, after=None) -> None
+def listen(sink: voice_recv.AudioSink, *, after=None, jitter_buffer: dict | None = None, speaking_timeout: float = 0.2) -> None
 ```
 Receives audio data into an `AudioSink`.  A sink is similar to the `AudioSource` class, where most of the logic is done in a single callback function, but in reverse.  Sinks are explained in detail in the [Sinks](#sinks) section below.
 
 The finalizer, `after` is called after the sink has been exhausted or an error occurred.  The callback signature is the same as the after callback for `play()`, one parameter for an optional Exception object.
+
+`jitter_buffer` tunes each user's jitter buffer, which puts packets back in order and decides when a missing one is
+given up on: `window` (how many newer packets may arrive while a missing one is waited for, default 25 = 0.5 s),
+`max_wait` (seconds a missing packet is waited for when nothing newer arrives, default 0.5) and `maxsize`
+(default 500). A larger window recovers more reordered packets at the cost of delay; for recording or speech to
+text the delay rarely matters. `speaking_timeout` is how long without packets ends `voice_member_speaking_start`
+with `voice_member_speaking_stop`. Example: `vc.listen(sink, jitter_buffer=dict(window=50, max_wait=1.0))`.
 
 ```python
 def is_listening() -> bool

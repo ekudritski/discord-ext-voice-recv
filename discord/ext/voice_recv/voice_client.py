@@ -150,9 +150,27 @@ class VoiceRecvClient(discord.VoiceClient):
     def _get_id_from_ssrc(self, ssrc: int) -> Optional[int]:
         return self._ssrc_to_id.get(ssrc)
 
-    def listen(self, sink: AudioSink, *, after: Optional[AfterCB] = None) -> None:
-        """Receives audio into a :class:`AudioSink`."""
-        # TODO: more info
+    def listen(
+        self,
+        sink: AudioSink,
+        *,
+        after: Optional[AfterCB] = None,
+        jitter_buffer: Optional[Dict[str, Any]] = None,
+        speaking_timeout: float = 0.2,
+    ) -> None:
+        """Receives audio into a :class:`AudioSink`.
+
+        Parameters
+        ----------
+        after
+            Called with the error (or ``None``) when listening stops.
+        jitter_buffer
+            Keyword arguments for each user's :class:`HeapJitterBuffer`: ``window`` (packets a missing
+            one is waited for while newer ones arrive, default 25), ``max_wait`` (seconds it is waited for
+            when nothing newer arrives, default 0.5), ``maxsize`` (default 500), ``prefsize``, ``prefill``.
+        speaking_timeout
+            Seconds without packets after which ``voice_member_speaking_stop`` is dispatched.
+        """
 
         if not self.is_connected():
             raise discord.ClientException('Not connected to voice.')
@@ -173,7 +191,7 @@ class VoiceRecvClient(discord.VoiceClient):
                     'Install libopus (or call discord.opus.load_opus()), or use a sink that wants opus.'
                 ) from None
 
-        self._reader = AudioReader(sink, self, after=after)
+        self._reader = AudioReader(sink, self, after=after, jitter_buffer=jitter_buffer, speaking_timeout=speaking_timeout)
         self._reader.start()
 
     def is_listening(self) -> bool:

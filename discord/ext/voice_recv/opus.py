@@ -51,7 +51,7 @@ class PacketDecoder:
         self.ssrc: int = ssrc
 
         self._decoder: Optional[Decoder] = None if self.sink.wants_opus() else Decoder()
-        self._buffer: JitterBuffer = JitterBuffer()
+        self._buffer: JitterBuffer = JitterBuffer(**router.reader.jitter_buffer)
         self._cached_id: Optional[int] = None
 
         self._last_seq: int = -1

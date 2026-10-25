@@ -36,15 +36,21 @@ class StubSink:
         return True
 
 
+class StubReader:
+    def __init__(self, jitter_buffer):
+        self.jitter_buffer = jitter_buffer
+
+
 class StubRouter:
-    def __init__(self):
+    def __init__(self, jitter_buffer=None):
         self.sink = StubSink()
         self.waiter = MultiDataEvent()
+        self.reader = StubReader(jitter_buffer or {})
 
 
 class Harness:
-    def __init__(self):
-        self.router = StubRouter()
+    def __init__(self, **jitter_buffer):
+        self.router = StubRouter(jitter_buffer)
         self.decoder = PacketDecoder(self.router, SSRC)
         self.out = []
 
@@ -226,3 +232,21 @@ def test_in_order_stream_logs_nothing(caplog):
     h = Harness()
     h.push([n for n in range(65500, 65600) if n % 7])
     assert not late_lines(caplog)
+
+
+def test_window_is_configurable():
+    # packet 10 arrives 19 packets late: inside the default window of 25, outside a window of 5
+    late = [*range(10), *range(11, 30), 10, *range(30, 40)]
+    h = Harness(window=5)
+    h.push(late)
+    assert 10 not in h.out and h.out == [n for n in range(40) if n != 10]
+
+
+def test_bad_buffer_options_fail_in_listen():
+    import pytest
+    from discord.ext.voice_recv.reader import AudioReader
+
+    with pytest.raises(ValueError):
+        AudioReader(StubSink(), None, jitter_buffer=dict(window=0))
+    with pytest.raises(TypeError):
+        AudioReader(StubSink(), None, jitter_buffer=dict(windw=5))

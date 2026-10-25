@@ -12,6 +12,7 @@ from typing import TYPE_CHECKING
 from . import rtp
 from .sinks import AudioSink
 from .router import PacketRouter, SinkEventRouter
+from .buffer import HeapJitterBuffer
 
 try:
     import nacl.secret
@@ -46,9 +47,21 @@ __all__ = [
 
 
 class AudioReader:
-    def __init__(self, sink: AudioSink, voice_client: VoiceRecvClient, *, after: Optional[AfterCB] = None):
+    def __init__(
+        self,
+        sink: AudioSink,
+        voice_client: VoiceRecvClient,
+        *,
+        after: Optional[AfterCB] = None,
+        jitter_buffer: Optional[Dict[str, Any]] = None,
+        speaking_timeout: float = 0.2,
+    ):
         if after is not None and not callable(after):
             raise TypeError('Expected a callable for the "after" parameter.')
+
+        self.jitter_buffer: Dict[str, Any] = dict(jitter_buffer or {})
+        # bad options fail here, in listen(), not later on the router thread
+        HeapJitterBuffer(**self.jitter_buffer)
 
         self.sink: AudioSink = sink
         self.voice_client: VoiceRecvClient = voice_client
@@ -64,6 +77,7 @@ class AudioReader:
         self.decryptor: PacketDecryptor = PacketDecryptor(voice_client.mode, bytes(voice_client.secret_key))
         self._crypto_errors: int = 0
         self.speaking_timer: SpeakingTimer = SpeakingTimer(self)
+        self.speaking_timer.speaking_timeout_delay = speaking_timeout
         self.keepalive: UDPKeepAlive = UDPKeepAlive(voice_client)
 
     def is_listening(self) -> bool:
