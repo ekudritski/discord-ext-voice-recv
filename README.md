@@ -133,6 +133,17 @@ This extension comes with several useful built in sinks, as well as a few [extra
     - `TimedFilter` - A conditional filter with a timer for how long it should operate.
   - `SilenceGeneratorSink` - Generates silence to fill in audio transmission downtime for a continuous data stream.  **Note: This sink is pretty broken and buggy right now and slated for rewrite.  Usage is not advised.**
 
+### Ogg Opus files
+`OggOpusWriter` writes Opus packets into an Ogg Opus file as they are, without re-encoding and without libogg (pure Python). Use it from a sink with `wants_opus()` returning `True`:
+
+```py
+writer = voice_recv.OggOpusWriter('out.ogg')
+writer.write(data.opus)  # in AudioSink.write()
+writer.close()
+```
+
+The granule position advances by each packet's duration. Gaps (lost packets, pauses) are not filled in, write `voice_recv.rtp.OPUS_SILENCE` packets in their place if the file should keep real time.
+
 ### Sink event listeners
 With AudioSinks being potentially more complex and stateful than AudioSources and the addition of new events, it is sometimes necessary to handle events in the context of a sink.  It would be rather awkward to have to register a sink function with `commands.Bot.add_listener()` while dealing with thread safety, and even more so using `discord.Client`.  To remedy this, listeners can be defined within sinks, similarly to how they work in Cogs.
 
