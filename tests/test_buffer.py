@@ -6,8 +6,7 @@ so expectations stay readable across the sequence rollover.
 """
 
 import struct
-
-import pytest
+import time
 
 from discord.ext.voice_recv import rtp
 from discord.ext.voice_recv.opus import PacketDecoder
@@ -57,6 +56,9 @@ class Harness:
 
     def drain(self):
         # same as PacketRouter._do_run: loop while any decoder is registered as ready
+        # older versions have no refresh(); kept optional so the suite can be run against upstream
+        if hasattr(self.decoder, "refresh"):
+            self.decoder.refresh()
         for _ in range(10_000):
             items = self.router.waiter.items
             if not items:
@@ -101,11 +103,33 @@ def test_two_packets_swapped():
     assert h.everything() == list(range(20))
 
 
-@pytest.mark.xfail(reason="reordering is only tolerated 1 packet deep: gap is skipped at once (fix 2: window)")
 def test_reorder_three_deep():
     h = Harness()
     h.push([*range(10), 12, 13, 10, 11, *range(14, 20)])
     assert h.everything() == list(range(20))
+
+
+def test_packet_late_within_window_recovered():
+    h = Harness()
+    h.push([*range(10), *range(11, 30), 10, *range(30, 40)])
+    assert h.out == list(range(40))
+
+
+def test_lost_packet_given_up_when_window_full():
+    h = Harness()
+    sent = [n for n in range(40) if n != 10]
+    h.push(sent)
+    assert h.out == sent
+
+
+def test_lost_packet_at_tail_released_by_time():
+    h = Harness()
+    h.decoder._buffer.max_wait = 0.05
+    h.push([*range(10), 11, 12])
+    assert h.out == list(range(10))
+    time.sleep(0.06)
+    h.drain()
+    assert h.out == [*range(10), 11, 12]
 
 
 def test_very_late_packet_dropped_rest_intact():
@@ -129,7 +153,6 @@ def test_swap_exactly_at_rollover():
     assert h.everything() == list(range(65533, 65540))
 
 
-@pytest.mark.xfail(reason="buffer drops oldest beyond maxsize=10 (200 ms) when the router stalls (fix 2: window)")
 def test_router_stall_loses_nothing():
     h = Harness()
     h.push(range(30), drain=False)
@@ -146,7 +169,6 @@ def test_reset_then_new_stream():
     assert h.everything() == list(range(5000, 5020))
 
 
-@pytest.mark.xfail(reason="a forward jump > 10000 without reset is taken as 'old' and dropped forever")
 def test_large_forward_jump_resyncs():
     h = Harness()
     h.push(range(100))
@@ -155,11 +177,18 @@ def test_large_forward_jump_resyncs():
     assert h.out[:5] == list(range(30000, 30005))
 
 
-@pytest.mark.xfail(reason="last packet waits in the buffer until the next one arrives (fix 2: time-based release)")
 def test_tail_is_released():
     h = Harness()
     h.push(range(10))
     assert h.out == list(range(10))
+
+
+def test_a_few_stray_old_packets_do_not_resync():
+    h = Harness()
+    h.push(range(100))
+    h.push(range(50, 55))
+    h.push(range(100, 110))
+    assert h.everything() == list(range(110))
 
 
 def test_waiter_does_not_accumulate_duplicates():

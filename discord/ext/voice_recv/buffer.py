@@ -5,6 +5,7 @@ from __future__ import annotations
 import heapq
 import logging
 import threading
+import time
 
 from .utils import gap_wrapped, add_wrapped
 
@@ -77,20 +78,38 @@ class HeapJitterBuffer(BaseBuffer[PacketT]):
     """Push item in, pop items out"""
 
     _threshold: int = 10000
+    # this many "old" packets in a row means the sender started a new sequence, not that they are late
+    _resync_after: int = 10
 
-    def __init__(self, maxsize: int = 10, *, prefsize: int = 1, prefill: int = 1):
+    def __init__(
+        self,
+        maxsize: int = 500,
+        *,
+        prefsize: int = 0,
+        prefill: int = 1,
+        window: int = 25,
+        max_wait: float = 0.5,
+    ):
         if maxsize < 1:
             raise ValueError(f'maxsize ({maxsize}) must be greater than 0')
 
         if not 0 <= prefsize <= maxsize:
             raise ValueError(f'prefsize must be between 0 and maxsize ({maxsize})')
 
+        if not 1 <= window <= maxsize:
+            raise ValueError(f'window must be between 1 and maxsize ({maxsize})')
+
         self.maxsize: int = maxsize
         self.prefsize: int = prefsize
         self.prefill: int = prefill
         self._prefill: int = prefill
+        # how long a missing packet is waited for: packets queued behind it, or seconds when the stream goes quiet
+        self.window: int = window
+        self.max_wait: float = max_wait
 
         self._last_tx_seq: int = -1
+        self._gap_since: Optional[float] = None
+        self._stray: List[AudioPacket] = []
 
         self._has_item: threading.Event = threading.Event()
         # I sure hope I dont need to add a lock to this
@@ -113,6 +132,7 @@ class HeapJitterBuffer(BaseBuffer[PacketT]):
         packet_ready = len(self._buffer) > self.prefsize
 
         if not prefilled or not packet_ready:
+            self._gap_since = None
             self._has_item.clear()
             return
 
@@ -122,11 +142,32 @@ class HeapJitterBuffer(BaseBuffer[PacketT]):
 
         # We have the next packet ready
         # OR we havent sent a packet out yet
-        # OR the buffer is full
-        if (sequential and positive_seq) or not positive_seq or len(self._buffer) >= self.maxsize:
+        if (sequential and positive_seq) or not positive_seq:
+            self._gap_since = None
+            self._has_item.set()
+            return
+
+        # The next packet is missing: give up on it once the window is full or it is overdue.
+        # Time matters at the end of an utterance, when no more packets come to fill the window.
+        now = time.monotonic()
+        if self._gap_since is None:
+            self._gap_since = now
+
+        if len(self._buffer) >= self.window or now - self._gap_since >= self.max_wait:
             self._has_item.set()
         else:
             self._has_item.clear()
+
+    def refresh(self) -> None:
+        """
+        Re-evaluate readiness, so that a packet held back for a missing one
+        is released after max_wait even if no further packets arrive.
+        """
+
+        self._update_has_item()
+
+    def is_ready(self) -> bool:
+        return self._has_item.is_set()
 
     def _cleanup(self) -> None:
         # Logging this is pointless until I fix the stale remote buffer issue
@@ -141,7 +182,9 @@ class HeapJitterBuffer(BaseBuffer[PacketT]):
     def push(self, packet: AudioPacket) -> bool:
         """
         Push a packet into the buffer.  If the packet would make the buffer
-        exceed its maxsize, the oldest packet will be dropped.
+        exceed its maxsize, the oldest packet will be dropped.  Packets older
+        than the last one popped are dropped, unless enough of them come in a
+        row to mean a new sequence.
         """
 
         seq = packet.sequence
@@ -149,10 +192,19 @@ class HeapJitterBuffer(BaseBuffer[PacketT]):
         # for the gap between _last_tx_seq and the current one, a large gap is old, a small gap is new
         # the gap for old packets will generally be very large since they wrap all the way around
         if gap_wrapped(self._last_tx_seq, seq) > self._threshold and self._last_tx_seq != -1:
-            log.debug("Dropping old packet %s", packet)
-            return False
+            self._stray.append(packet)
+            if len(self._stray) < self._resync_after:
+                log.debug("Dropping old packet %s", packet)
+                return False
 
-        self._push(packet)
+            log.info("Sequence jumped to %s, resyncing", self._stray[0].sequence)
+            stray = self._stray
+            self.reset()
+            for old in stray:
+                self._push(old)
+        else:
+            self._stray.clear()
+            self._push(packet)
 
         if self._prefill > 0:
             self._prefill -= 1
@@ -180,21 +232,9 @@ class HeapJitterBuffer(BaseBuffer[PacketT]):
 
         if packet is not None:
             self._last_tx_seq = packet.sequence
+            # a further gap gets its own full wait
+            self._gap_since = None
 
-        self._update_has_item()
-        return packet
-
-    def pop_oldest(self) -> Optional[AudioPacket]:
-        """
-        Pop the oldest packet even if it is not sequential, skipping the gap.
-        The rest of the buffer is kept.
-        """
-
-        if not self._buffer:
-            return None
-
-        packet = self._pop()
-        self._last_tx_seq = packet.sequence
         self._update_has_item()
         return packet
 
@@ -248,6 +288,7 @@ class HeapJitterBuffer(BaseBuffer[PacketT]):
             self._last_tx_seq = packets[-1].sequence
 
         self._prefill = self.prefill
+        self._gap_since = None
         self._has_item.clear()
 
         return packets
@@ -261,3 +302,5 @@ class HeapJitterBuffer(BaseBuffer[PacketT]):
         self._has_item.clear()
         self._prefill = self.prefill
         self._last_tx_seq = -1
+        self._gap_since = None
+        self._stray = []

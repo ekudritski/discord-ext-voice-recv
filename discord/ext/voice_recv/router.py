@@ -26,6 +26,8 @@ log = logging.getLogger(__name__)
 
 
 class PacketRouter(threading.Thread):
+    REFRESH_INTERVAL: float = 0.05
+
     def __init__(self, sink: AudioSink, reader: AudioReader):
         super().__init__(daemon=True, name=f"packet-router-{id(self):x}")
 
@@ -105,8 +107,11 @@ class PacketRouter(threading.Thread):
 
     def _do_run(self) -> None:
         while not self._end_thread.is_set():
-            self.waiter.wait()
+            # wake up regularly: a packet held back for a missing one is released by time, not by a new packet
+            self.waiter.wait(self.REFRESH_INTERVAL)
             with self._lock:
+                for decoder in self.decoders.values():
+                    decoder.refresh()
                 for decoder in self.waiter.items:
                     data = decoder.pop_data()
                     if data is not None:

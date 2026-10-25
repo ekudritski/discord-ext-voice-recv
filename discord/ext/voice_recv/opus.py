@@ -69,7 +69,7 @@ class PacketDecoder:
         return self._get_user(self._cached_id) if self._cached_id else None
 
     def _flag_ready_state(self):
-        if self._buffer.peek():
+        if self._buffer.is_ready():
             self.router.waiter.register(self)
         else:
             self.router.waiter.unregister(self)
@@ -86,6 +86,10 @@ class PacketDecoder:
             return
 
         return self._process_packet(packet)
+
+    def refresh(self) -> None:
+        self._buffer.refresh()
+        self._flag_ready_state()
 
     def set_user_id(self, user_id: int) -> None:
         self._cached_id = user_id
@@ -105,9 +109,9 @@ class PacketDecoder:
         packet = self._buffer.pop(timeout=timeout)
 
         if packet is None:
-            # Next packet is missing: skip the gap with the oldest buffered packet.
+            # Not ready; the buffer decides when a missing packet is given up on.
             # Flushing here used to drop everything behind it on a single lost packet.
-            return self._buffer.pop_oldest()
+            return None
         elif not packet:
             packet = self._make_fakepacket()
 
